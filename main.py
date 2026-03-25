@@ -1,237 +1,295 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Query, HTTPException, status
+from pydantic import BaseModel, Field
+from typing import Optional, List
 
 app = FastAPI()
 
-# Product list
-products = [
-    {"id": 1, "name": "Notebook", "price": 50, "category": "Stationery", "in_stock": True},
-    {"id": 2, "name": "Pen", "price": 10, "category": "Stationery", "in_stock": True},
-    {"id": 3, "name": "Mouse", "price": 500, "category": "Electronics", "in_stock": True},
-    {"id": 4, "name": "Headphones", "price": 1500, "category": "Electronics", "in_stock": False},
-
-    # Q1: Added products
-    {"id": 5, "name": "Laptop Stand", "price": 1299, "category": "Electronics", "in_stock": True},
-    {"id": 6, "name": "Mechanical Keyboard", "price": 2499, "category": "Electronics", "in_stock": True},
-    {"id": 7, "name": "Webcam", "price": 1899, "category": "Electronics", "in_stock": False},
+# -------------------------
+# DATA
+# -------------------------
+menu = [
+    {"id": 1, "name": "Pizza", "price": 200, "category": "Pizza", "is_available": True},
+    {"id": 2, "name": "Burger", "price": 120, "category": "Burger", "is_available": True},
+    {"id": 3, "name": "Pasta", "price": 180, "category": "Pizza", "is_available": False},
+    {"id": 4, "name": "Coke", "price": 50, "category": "Drink", "is_available": True},
+    {"id": 5, "name": "Ice Cream", "price": 90, "category": "Dessert", "is_available": True},
+    {"id": 6, "name": "Sandwich", "price": 100, "category": "Burger", "is_available": True},
 ]
 
-# Home route
+orders = []
+order_counter = 1
+
+cart = []
+
+# -------------------------
+# HELPERS
+# -------------------------
+def find_menu_item(item_id):
+    for item in menu:
+        if item["id"] == item_id:
+            return item
+    return None
+
+def calculate_bill(price, quantity, order_type):
+    total = price * quantity
+    if order_type == "delivery":
+        total += 30
+    return total
+
+def filter_menu_logic(category, max_price, is_available):
+    result = []
+    for item in menu:
+        if category is not None and item["category"] != category:
+            continue
+        if max_price is not None and item["price"] > max_price:
+            continue
+        if is_available is not None and item["is_available"] != is_available:
+            continue
+        result.append(item)
+    return result
+
+# -------------------------
+# PYDANTIC MODELS
+# -------------------------
+class OrderRequest(BaseModel):
+    customer_name: str = Field(..., min_length=2)
+    item_id: int = Field(..., gt=0)
+    quantity: int = Field(..., gt=0, le=20)
+    delivery_address: str = Field(..., min_length=5)
+    order_type: str = "delivery"
+
+class NewMenuItem(BaseModel):
+    name: str = Field(..., min_length=2)
+    price: int = Field(..., gt=0)
+    category: str = Field(..., min_length=2)
+    is_available: bool = True
+
+class CheckoutRequest(BaseModel):
+    customer_name: str
+    delivery_address: str
+
+# -------------------------
+# DAY 1 - GET
+# -------------------------
 @app.get("/")
 def home():
-    return {"message": "Welcome to the Product API"}
+    return {"message": "Welcome to Food Delivery App"}
 
-# Show all products
-@app.get("/products")
-def get_products():
-    return {"products": products, "total": len(products)}
+@app.get("/menu")
+def get_menu():
+    return {"total": len(menu), "items": menu}
 
-
-# Q2: Filter by category
-@app.get("/products/category/{category_name}")
-def get_by_category(category_name: str):
-
-    result = [p for p in products if p["category"].lower() == category_name.lower()]
-
-    if not result:
-        return {"error": "No products found in this category"}
-
+@app.get("/menu/summary")
+def menu_summary():
+    available = sum(1 for i in menu if i["is_available"])
+    categories = list(set(i["category"] for i in menu))
     return {
-        "category": category_name,
-        "products": result,
-        "total": len(result)
-    }
-
-
-# Q3: Show only in-stock products
-@app.get("/products/instock")
-def get_instock():
-
-    available = [p for p in products if p["in_stock"] == True]
-
-    return {
-        "in_stock_products": available,
-        "count": len(available)
-    }
-
-
-# Q4: Store info summary
-@app.get("/store/info")
-def store_info():
-
-    total_products = len(products)
-    in_stock = len([p for p in products if p["in_stock"] == True])
-    out_stock = len([p for p in products if p["in_stock"] == False])
-
-    return {
-        "store": "My Online Store",
-        "total_products": total_products,
-        "in_stock_products": in_stock,
-        "out_of_stock_products": out_stock
-    }
-
-
-# Q5: Bonus - Get product by ID
-@app.get("/products/{product_id}")
-def get_product(product_id: int):
-
-    for p in products:
-        if p["id"] == product_id:
-            return p
-
-    return {"error": "Product not found"}
-
-from fastapi import Query
-@app.get("/products/filter")
-def filter_products(
-    category: str = Query(None),
-    max_price: int = Query(None),
-    min_price: int = Query(None)
-):
-    result = products
-
-    if category:
-        result = [p for p in result if p["category"].lower() == category.lower()]
-
-    if max_price:
-        result = [p for p in result if p["price"] <= max_price]
-
-    if min_price:
-        result = [p for p in result if p["price"] >= min_price]
-
-    return {"products": result}
-
-@app.get("/products/{product_id}/price")
-def get_product_price(product_id: int):
-    for product in products:
-        if product["id"] == product_id:
-            return {
-                "name": product["name"],
-                "price": product["price"]
-            }
-
-    return {"error": "Product not found"}
-
-
-from pydantic import BaseModel, Field
-from typing import Optional
-
-class CustomerFeedback(BaseModel):
-    customer_name: str = Field(..., min_length=2, max_length=100)
-    product_id: int = Field(..., gt=0)
-    rating: int = Field(..., ge=1, le=5)
-    comment: Optional[str] = None
-
-feedback = []
-
-@app.post("/feedback")
-def submit_feedback(data: CustomerFeedback):
-
-    feedback.append(data.dict())
-
-    return {
-        "message": "Feedback submitted successfully",
-        "feedback": data.dict(),
-        "total_feedback": len(feedback)
-    }
-
-@app.get("/products/summary")
-def product_summary():
-
-    in_stock = [p for p in products if p["in_stock"]]
-    out_stock = [p for p in products if not p["in_stock"]]
-
-    expensive = max(products, key=lambda p: p["price"])
-    cheapest = min(products, key=lambda p: p["price"])
-
-    categories = list(set(p["category"] for p in products))
-
-    return {
-        "total_products": len(products),
-        "in_stock_count": len(in_stock),
-        "out_of_stock_count": len(out_stock),
-        "most_expensive": {
-            "name": expensive["name"],
-            "price": expensive["price"]
-        },
-        "cheapest": {
-            "name": cheapest["name"],
-            "price": cheapest["price"]
-        },
+        "total": len(menu),
+        "available": available,
+        "unavailable": len(menu) - available,
         "categories": categories
     }
 
+@app.get("/menu/{item_id}")
+def get_item(item_id: int):
+    item = find_menu_item(item_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+    return item
 
-from typing import List
+@app.get("/orders")
+def get_orders():
+    return {"total_orders": len(orders), "orders": orders}
 
-class OrderItem(BaseModel):
-    product_id: int = Field(..., gt=0)
-    quantity: int = Field(..., gt=0, le=50)
+# -------------------------
+# DAY 2 + 3 - POST + HELPERS
+# -------------------------
+@app.post("/orders")
+def create_order(order: OrderRequest):
+    global order_counter
 
-class BulkOrder(BaseModel):
-    company_name: str = Field(..., min_length=2)
-    contact_email: str = Field(..., min_length=5)
-    items: List[OrderItem] = Field(..., min_items=1)
+    item = find_menu_item(order.item_id)
+    if not item:
+        raise HTTPException(404, "Item not found")
 
-@app.post("/orders/bulk")
-def place_bulk_order(order: BulkOrder):
+    if not item["is_available"]:
+        raise HTTPException(400, "Item not available")
 
-    confirmed = []
-    failed = []
-    grand_total = 0
+    total = calculate_bill(item["price"], order.quantity, order.order_type)
 
-    for item in order.items:
-
-        product = next((p for p in products if p["id"] == item.product_id), None)
-
-        if not product:
-            failed.append({
-                "product_id": item.product_id,
-                "reason": "Product not found"
-            })
-
-        elif not product["in_stock"]:
-            failed.append({
-                "product_id": item.product_id,
-                "reason": f"{product['name']} is out of stock"
-            })
-
-        else:
-            subtotal = product["price"] * item.quantity
-            grand_total += subtotal
-
-            confirmed.append({
-                "product": product["name"],
-                "qty": item.quantity,
-                "subtotal": subtotal
-            })
-
-    return {
-        "company": order.company_name,
-        "confirmed": confirmed,
-        "failed": failed,
-        "grand_total": grand_total
+    new_order = {
+        "order_id": order_counter,
+        "customer_name": order.customer_name,
+        "item": item["name"],
+        "quantity": order.quantity,
+        "total_price": total
     }
 
-orders = []
-@app.get("/orders/{order_id}")
-def get_order(order_id: int):
+    orders.append(new_order)
+    order_counter += 1
 
-    for order in orders:
-        if order["order_id"] == order_id:
-            return {"order": order}
+    return new_order
 
-    return {"error": "Order not found"}
+@app.get("/menu/filter")
+def filter_menu(category: Optional[str] = None,
+                max_price: Optional[int] = None,
+                is_available: Optional[bool] = None):
+    result = filter_menu_logic(category, max_price, is_available)
+    return {"total": len(result), "items": result}
 
+# -------------------------
+# DAY 4 - CRUD
+# -------------------------
+@app.post("/menu", status_code=201)
+def add_menu(item: NewMenuItem):
+    for i in menu:
+        if i["name"].lower() == item.name.lower():
+            raise HTTPException(400, "Item already exists")
 
-@app.patch("/orders/{order_id}/confirm")
-def confirm_order(order_id: int):
+    new_id = max(i["id"] for i in menu) + 1
 
-    for order in orders:
-        if order["order_id"] == order_id:
-            order["status"] = "confirmed"
-            return {
-                "message": "Order confirmed",
-                "order": order
-            }
+    new_item = item.dict()
+    new_item["id"] = new_id
 
-    return {"error": "Order not found"}
+    menu.append(new_item)
+    return new_item
+
+@app.put("/menu/{item_id}")
+def update_menu(item_id: int,
+                price: Optional[int] = None,
+                is_available: Optional[bool] = None):
+    item = find_menu_item(item_id)
+    if not item:
+        raise HTTPException(404, "Item not found")
+
+    if price is not None:
+        item["price"] = price
+    if is_available is not None:
+        item["is_available"] = is_available
+
+    return item
+
+@app.delete("/menu/{item_id}")
+def delete_menu(item_id: int):
+    item = find_menu_item(item_id)
+    if not item:
+        raise HTTPException(404, "Item not found")
+
+    menu.remove(item)
+    return {"message": "Deleted successfully"}
+
+# -------------------------
+# DAY 5 - CART WORKFLOW
+# -------------------------
+@app.post("/cart/add")
+def add_to_cart(item_id: int, quantity: int = 1):
+    item = find_menu_item(item_id)
+    if not item:
+        raise HTTPException(404, "Item not found")
+
+    if not item["is_available"]:
+        raise HTTPException(400, "Not available")
+
+    for c in cart:
+        if c["item_id"] == item_id:
+            c["quantity"] += quantity
+            return {"message": "Updated cart", "cart": cart}
+
+    cart.append({"item_id": item_id, "name": item["name"], "price": item["price"], "quantity": quantity})
+    return {"message": "Added to cart", "cart": cart}
+
+@app.get("/cart")
+def view_cart():
+    total = sum(i["price"] * i["quantity"] for i in cart)
+    return {"cart": cart, "grand_total": total}
+
+@app.delete("/cart/{item_id}")
+def remove_cart(item_id: int):
+    for c in cart:
+        if c["item_id"] == item_id:
+            cart.remove(c)
+            return {"message": "Removed"}
+    raise HTTPException(404, "Item not in cart")
+
+@app.post("/cart/checkout", status_code=201)
+def checkout(data: CheckoutRequest):
+    global order_counter
+
+    if not cart:
+        raise HTTPException(400, "Cart empty")
+
+    total = 0
+    new_orders = []
+
+    for c in cart:
+        order = {
+            "order_id": order_counter,
+            "customer_name": data.customer_name,
+            "item": c["name"],
+            "quantity": c["quantity"],
+            "total_price": c["price"] * c["quantity"]
+        }
+        total += order["total_price"]
+        orders.append(order)
+        new_orders.append(order)
+        order_counter += 1
+
+    cart.clear()
+
+    return {"orders": new_orders, "grand_total": total}
+
+# -------------------------
+# DAY 6 - ADVANCED
+# -------------------------
+@app.get("/menu/search")
+def search(keyword: str):
+    result = [i for i in menu if keyword.lower() in i["name"].lower() or keyword.lower() in i["category"].lower()]
+    return {"total_found": len(result), "items": result}
+
+@app.get("/menu/sort")
+def sort(sort_by: str = "price", order: str = "asc"):
+    if sort_by not in ["price", "name", "category"]:
+        raise HTTPException(400, "Invalid sort_by")
+
+    reverse = True if order == "desc" else False
+    sorted_list = sorted(menu, key=lambda x: x[sort_by], reverse=reverse)
+
+    return {"sorted": sorted_list}
+
+@app.get("/menu/page")
+def paginate(page: int = 1, limit: int = 3):
+    start = (page - 1) * limit
+    data = menu[start:start + limit]
+    total_pages = (len(menu) + limit - 1) // limit
+
+    return {
+        "page": page,
+        "limit": limit,
+        "total": len(menu),
+        "total_pages": total_pages,
+        "items": data
+    }
+
+@app.get("/menu/browse")
+def browse(keyword: Optional[str] = None,
+           sort_by: str = "price",
+           order: str = "asc",
+           page: int = 1,
+           limit: int = 3):
+
+    data = menu
+
+    if keyword:
+        data = [i for i in data if keyword.lower() in i["name"].lower()]
+
+    reverse = True if order == "desc" else False
+    data = sorted(data, key=lambda x: x[sort_by], reverse=reverse)
+
+    start = (page - 1) * limit
+    paginated = data[start:start + limit]
+
+    return {
+        "total": len(data),
+        "page": page,
+        "items": paginated
+    }
